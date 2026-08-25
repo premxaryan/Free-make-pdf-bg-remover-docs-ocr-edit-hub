@@ -1,0 +1,363 @@
+export type CommercialTemplateType = 
+  | 'visit_receipt'
+  | 'cash_memo'
+  | 'job_order'
+  | 'payment_receipt'
+  | 'delivery_challan';
+
+export type PaperSizeOption = 'A4' | 'A5' | 'A4_DUAL' | 'THERMAL_80MM';
+export type PrintThemeOption = 'classic_border' | 'modern_slate' | 'cyber_csc' | 'minimal_clean';
+
+export interface LineItem {
+  id: string;
+  description: string;
+  hsnSac?: string;
+  qty: number;
+  unit: string;
+  rate: number;
+  discount?: number;
+  amount: number;
+}
+
+export interface BusinessProfile {
+  name: string;
+  hindiName?: string;
+  tagline: string;
+  address: string;
+  phone: string;
+  email?: string;
+  gstin?: string;
+  udyamNo?: string;
+  panNo?: string;
+  upiId?: string;
+  bankName?: string;
+  accountNo?: string;
+  ifscCode?: string;
+  logoIconName?: string;
+}
+
+export interface VisitReceiptData {
+  receiptNo: string;
+  tokenNo: string;
+  date: string;
+  time: string;
+  visitorName: string;
+  phone: string;
+  email?: string;
+  address?: string;
+  purposeOfVisit: string;
+  departmentOrDesk: string;
+  attendedBy: string;
+  counterNo: string;
+  feeAmount: number;
+  paymentMode: 'Cash' | 'UPI' | 'Card' | 'Free';
+  transactionId?: string;
+  status: 'Completed' | 'Pending' | 'Follow-up Required';
+  followUpDate?: string;
+  remarks: string;
+  issuedBy: string;
+}
+
+export interface CashMemoData {
+  memoNo: string;
+  date: string;
+  time: string;
+  paymentMode: 'Cash' | 'UPI / QR' | 'Card' | 'Credit' | 'Bank Transfer';
+  customerName: string;
+  customerPhone: string;
+  customerAddress: string;
+  customerGstin?: string;
+  items: LineItem[];
+  subtotal: number;
+  discountAmount: number;
+  taxRatePercent: number; // 0, 5, 12, 18, 28
+  taxAmount: number;
+  otherCharges: number;
+  grandTotal: number;
+  amountInWords: string;
+  terms: string[];
+  authorizedSignatory: string;
+}
+
+export interface JobOrderItem {
+  id: string;
+  serviceCategory: string;
+  taskDescription: string;
+  pagesOrCopies: number;
+  specifications: string;
+  estimatedCost: number;
+}
+
+export interface JobOrderData {
+  orderNo: string;
+  orderDate: string;
+  promisedDate: string;
+  promisedTime: string;
+  priority: 'Normal' | 'Urgent' | 'Tatkal (Same Day)';
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  customerAddress: string;
+  
+  serviceCategory: string;
+  jobDetails: string;
+  itemsReceived: string[]; // e.g. ["Original Marksheet", "USB Pen Drive 32GB", "Passport Size Photo (2 Copies)"]
+  specialInstructions: string;
+  
+  orderItems: JobOrderItem[];
+  estimatedTotal: number;
+  advanceReceived: number;
+  balanceDue: number;
+  paymentMode: 'Cash' | 'UPI' | 'Card';
+  
+  assignedTechnician: string;
+  jobStatus: 'Received' | 'In Progress' | 'Ready for Pickup' | 'Delivered';
+  terms: string[];
+}
+
+export interface PaymentReceiptData {
+  receiptNo: string;
+  date: string;
+  receivedFrom: string;
+  amount: number;
+  amountInWords: string;
+  onAccountOf: string;
+  paymentMode: 'Cash' | 'Cheque' | 'UPI' | 'NEFT/RTGS';
+  referenceNo: string;
+  chequeDate?: string;
+  bankBranch?: string;
+  balanceDue: number;
+  receiverName: string;
+  remarks: string;
+}
+
+export interface DeliveryChallanData {
+  challanNo: string;
+  date: string;
+  orderRefNo: string;
+  vehicleNo?: string;
+  receiverName: string;
+  receiverPhone: string;
+  deliveryAddress: string;
+  items: {
+    id: string;
+    description: string;
+    qty: number;
+    unit: string;
+    remarks: string;
+  }[];
+  preparedBy: string;
+  receivedBy: string;
+  terms: string[];
+}
+
+export const DEFAULT_BUSINESS_PROFILE: BusinessProfile = {
+  name: 'APNA DIGITAL SEVA KENDRA & CYBER CAFE',
+  hindiName: 'अपना डिजिटल सेवा केंद्र एवं साइबर कैफे',
+  tagline: 'CSC E-Governance Services • All Online Forms • High-Speed Print & Xerox',
+  address: 'Shop No. 12, Main Market, Near Tehsil Complex & SBI Branch, Pin - 302001',
+  phone: '+91 98765 43210 / 87654 32109',
+  email: 'apna.csc.cyber@gmail.com',
+  gstin: '08AAAAA0000A1Z5',
+  udyamNo: 'UDYAM-RJ-14-0012345',
+  panNo: 'ABCDE1234F',
+  upiId: 'apnacsc@upi',
+  bankName: 'State Bank of India',
+  accountNo: '30123456789',
+  ifscCode: 'SBIN0001234',
+  logoIconName: 'printer'
+};
+
+export const SAMPLE_VISIT_RECEIPT: VisitReceiptData = {
+  receiptNo: 'VR-2026-0842',
+  tokenNo: 'T-18',
+  date: new Date().toISOString().split('T')[0],
+  time: '11:30 AM',
+  visitorName: 'Rameshwar Lal Saini',
+  phone: '+91 98290 12345',
+  email: 'rameshwar.saini@gmail.com',
+  address: 'Ward No. 4, Village Rampur, Tehsil Sadar',
+  purposeOfVisit: 'Aadhaar Demographic Update & PM-Kisan e-KYC Verification',
+  departmentOrDesk: 'CSC Citizen Services Desk 2',
+  attendedBy: 'Sunil Verma (CSC VLE)',
+  counterNo: 'Counter #02',
+  feeAmount: 50,
+  paymentMode: 'UPI',
+  transactionId: 'UPI-REF-9812470129',
+  status: 'Completed',
+  followUpDate: '2026-09-02',
+  remarks: 'Biometric update request submitted. SMS confirmation sent to registered mobile.',
+  issuedBy: 'Sunil Verma'
+};
+
+export const SAMPLE_CASH_MEMO: CashMemoData = {
+  memoNo: 'CM-2026-1194',
+  date: new Date().toISOString().split('T')[0],
+  time: '02:45 PM',
+  paymentMode: 'UPI / QR',
+  customerName: 'Pooja Sharma',
+  customerPhone: '+91 94140 87654',
+  customerAddress: 'Plot 45, Shivaji Nagar, Jaipur',
+  customerGstin: '',
+  items: [
+    {
+      id: 'item-1',
+      description: 'Online Competitive Exam Application Form Filling (SSC CGL 2026)',
+      hsnSac: '998431',
+      qty: 1,
+      unit: 'Form',
+      rate: 150,
+      discount: 0,
+      amount: 150
+    },
+    {
+      id: 'item-2',
+      description: 'Color Passport Photo Printing & Matte Lamination (8 Copies Sheet)',
+      hsnSac: '998314',
+      qty: 2,
+      unit: 'Sheets',
+      rate: 60,
+      discount: 10,
+      amount: 110
+    },
+    {
+      id: 'item-3',
+      description: 'High Quality B&W Document Xerox & Spiral Book Binding (75 Pages)',
+      hsnSac: '998912',
+      qty: 1,
+      unit: 'Set',
+      rate: 120,
+      discount: 0,
+      amount: 120
+    },
+    {
+      id: 'item-4',
+      description: 'Document Scanning, Size Optimization & Strict 50KB PDF Creation',
+      hsnSac: '998431',
+      qty: 4,
+      unit: 'Files',
+      rate: 20,
+      discount: 0,
+      amount: 80
+    }
+  ],
+  subtotal: 460,
+  discountAmount: 10,
+  taxRatePercent: 0,
+  taxAmount: 0,
+  otherCharges: 0,
+  grandTotal: 460,
+  amountInWords: 'Rupees Four Hundred and Sixty Only',
+  terms: [
+    'Goods / digital print services once provided cannot be refunded.',
+    'Please verify all printed details and certificates before leaving counter.',
+    'For any query or corrections, please bring this original cash memo within 48 hours.'
+  ],
+  authorizedSignatory: 'Apna Digital Seva Kendra'
+};
+
+export const SAMPLE_JOB_ORDER: JobOrderData = {
+  orderNo: 'JO-2026-0567',
+  orderDate: new Date().toISOString().split('T')[0],
+  promisedDate: new Date(Date.now() + 24 * 3600 * 1000).toISOString().split('T')[0],
+  promisedTime: '05:00 PM',
+  priority: 'Urgent',
+  customerName: 'Amitabh Choudhary (Advocate)',
+  customerPhone: '+91 97841 55667',
+  customerEmail: 'amitabh.legal@gmail.com',
+  customerAddress: 'Chamber 14, District Court Compound',
+  
+  serviceCategory: 'Legal Affidavit Typing, English-to-Hindi Translation & Urgent Printing',
+  jobDetails: 'Court Notary Affidavit Drafting (Gap Year & Name Correction) + 5 Sets Color Print with Hard Cover Binding for High Court submission.',
+  itemsReceived: [
+    'Original 10th & 12th Marksheet Photocopy',
+    'Old Aadhaar Card Copy with mismatch',
+    'Pen Drive (Case Brief PDF - 45MB)'
+  ],
+  specialInstructions: 'Use Kruti Dev 010 / Mangal font standard court margin formatting. Keep 2 inch top margin on stamp paper.',
+  
+  orderItems: [
+    {
+      id: 'job-1',
+      serviceCategory: 'Legal Drafting',
+      taskDescription: 'Notary Affidavit Typing & Proofreading (Both Hindi & English)',
+      pagesOrCopies: 2,
+      specifications: 'Standard Legal Green Paper Format',
+      estimatedCost: 250
+    },
+    {
+      id: 'job-2',
+      serviceCategory: 'Printing & Binding',
+      taskDescription: 'High-Speed Double-Sided Color Printing (80 GSM Paper)',
+      pagesOrCopies: 50,
+      specifications: 'A4 High Gloss Heavy Front Sheet',
+      estimatedCost: 200
+    },
+    {
+      id: 'job-3',
+      serviceCategory: 'Binding',
+      taskDescription: 'Thermal Strip Book Binding with Transparent Protective Sheets',
+      pagesOrCopies: 5,
+      specifications: '5 Complete Dossier Sets',
+      estimatedCost: 150
+    }
+  ],
+  estimatedTotal: 600,
+  advanceReceived: 300,
+  balanceDue: 300,
+  paymentMode: 'Cash',
+  
+  assignedTechnician: 'Vikram Singh (Senior DTP Operator)',
+  jobStatus: 'In Progress',
+  terms: [
+    'Customer must present this original order slip to collect completed work.',
+    'Please inspect and verify draft contents before final court submission.',
+    'Storage of uncollected customer documents is limited to 15 days from promised date.'
+  ]
+};
+
+export const SAMPLE_PAYMENT_RECEIPT: PaymentReceiptData = {
+  receiptNo: 'PR-2026-0319',
+  date: new Date().toISOString().split('T')[0],
+  receivedFrom: 'M/s Rajasthan Traders & Logistics',
+  amount: 2500,
+  amountInWords: 'Rupees Two Thousand Five Hundred Only',
+  onAccountOf: 'Monthly Cyber Cafe Internet Station & DTP Printing Support Services for August 2026',
+  paymentMode: 'UPI',
+  referenceNo: 'UPI-TRANS-778901234',
+  balanceDue: 0,
+  receiverName: 'Apna Digital Seva Kendra',
+  remarks: 'Full settlement received with thanks.'
+};
+
+export const SAMPLE_DELIVERY_CHALLAN: DeliveryChallanData = {
+  challanNo: 'DC-2026-0182',
+  date: new Date().toISOString().split('T')[0],
+  orderRefNo: 'JO-2026-0567',
+  vehicleNo: 'Self Delivery / Counter Pickup',
+  receiverName: 'Amitabh Choudhary',
+  receiverPhone: '+91 97841 55667',
+  deliveryAddress: 'Chamber 14, District Court Compound',
+  items: [
+    {
+      id: 'dc-1',
+      description: 'High Court Case Dossier Spiral Bound Books (50 Pages Each)',
+      qty: 5,
+      unit: 'Sets',
+      remarks: 'Inspected & Sealed'
+    },
+    {
+      id: 'dc-2',
+      description: 'Original Customer Documents & 32GB Pen Drive Returned Safely',
+      qty: 1,
+      unit: 'Pouch',
+      remarks: 'Returned in original condition'
+    }
+  ],
+  preparedBy: 'Sunil Verma',
+  receivedBy: 'Amitabh Choudhary',
+  terms: [
+    'All items received in good condition without defect.',
+    'Any discrepancy must be reported within 24 hours.'
+  ]
+};
