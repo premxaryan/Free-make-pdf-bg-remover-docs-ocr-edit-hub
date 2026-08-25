@@ -1,0 +1,667 @@
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { 
+  Upload, 
+  Download, 
+  Sparkles, 
+  Sliders, 
+  CheckCircle2, 
+  AlertCircle, 
+  FileText, 
+  Image as ImageIcon, 
+  PenTool, 
+  RefreshCw, 
+  ArrowRight,
+  ShieldCheck,
+  Zap
+} from 'lucide-react';
+
+export interface ImageKbCompressorProps {
+  initialImageSrc?: string | null;
+}
+
+export const ImageKbCompressor: React.FC<ImageKbCompressorProps> = ({ initialImageSrc }) => {
+  const [originalFile, setOriginalFile] = useState<File | null>(null);
+  const [originalUrl, setOriginalUrl] = useState<string | null>(initialImageSrc || null);
+  const [originalSizeKb, setOriginalSizeKb] = useState<number>(0);
+  const [originalDims, setOriginalDims] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+
+  // Compressed result
+  const [compressedUrl, setCompressedUrl] = useState<string | null>(null);
+  const [compressedBlob, setCompressedBlob] = useState<Blob | null>(null);
+  const [compressedSizeKb, setCompressedSizeKb] = useState<number>(0);
+  const [compressedDims, setCompressedDims] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const [isCompressing, setIsCompressing] = useState<boolean>(false);
+
+  // Settings
+  const [targetKb, setTargetKb] = useState<number>(48); // default < 50 KB target
+  const [customKbInput, setCustomKbInput] = useState<string>('50');
+  const [isSignatureMode, setIsSignatureMode] = useState<boolean>(false);
+  const [bwThreshold, setBwThreshold] = useState<number>(160); // for signature B&W filter
+  const [maxDimension, setMaxDimension] = useState<number>(1200); // max width/height cap
+  const [fileType, setFileType] = useState<'image/jpeg' | 'image/png'>('image/jpeg');
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Handle incoming initialImageSrc
+  useEffect(() => {
+    if (!initialImageSrc) return;
+    const img = new Image();
+    img.onload = () => {
+      setOriginalUrl(initialImageSrc);
+      setOriginalDims({ width: img.width, height: img.height });
+      // Approximate size from data URL or blob
+      const approxKb = Math.round((initialImageSrc.length * 0.75 / 1024) * 10) / 10;
+      setOriginalSizeKb(approxKb || 240);
+    };
+    img.src = initialImageSrc;
+  }, [initialImageSrc]);
+
+  // Default sample image loader if empty
+  useEffect(() => {
+    if (initialImageSrc) return;
+    // Create clean default avatar
+    const canvas = document.createElement('canvas');
+    canvas.width = 600;
+    canvas.height = 700;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#f1f5f9';
+      ctx.fillRect(0, 0, 600, 700);
+
+      ctx.fillStyle = '#3b82f6';
+      ctx.beginPath();
+      ctx.arc(300, 260, 120, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#1e3a8a';
+      ctx.beginPath();
+      ctx.ellipse(300, 560, 220, 180, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('SAMPLE PASSPORT PHOTO', 300, 640);
+
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const file = new File([blob], 'sample_photo.jpg', { type: 'image/jpeg' });
+          setOriginalFile(file);
+          setOriginalUrl(canvas.toDataURL('image/jpeg', 0.95));
+          setOriginalSizeKb(Math.round(blob.size / 1024 * 10) / 10);
+          setOriginalDims({ width: 600, height: 700 });
+        }
+      }, 'image/jpeg', 0.95);
+    }
+  }, []);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setOriginalFile(file);
+    setOriginalSizeKb(Math.round((file.size / 1024) * 10) / 10);
+
+    const url = URL.createObjectURL(file);
+    setOriginalUrl(url);
+
+    const img = new Image();
+    img.src = url;
+    img.onload = () => {
+      setOriginalDims({ width: img.width, height: img.height });
+      // Auto switch to signature mode if width is wide or user named signature
+      if (file.name.toLowerCase().includes('sig') || img.width > img.height * 1.6) {
+        setIsSignatureMode(true);
+        if (targetKb > 20) setTargetKb(18); // set < 20KB for signature
+      }
+    };
+  };
+
+  // Binary Search Compression Engine
+  const runCompression = useCallback(async () => {
+    if (!originalUrl) return;
+    setIsCompressing(true);
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = originalUrl;
+
+    img.onload = async () => {
+      let canvas = offscreenCanvasRef.current;
+      if (!canvas) {
+        canvas = document.createElement('canvas');
+        offscreenCanvasRef.current = canvas;
+      }
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) {
+        setIsCompressing(false);
+        return;
+      }
+
+      // 1. Calculate Initial Scaled Dimensions
+      let targetW = img.width;
+      let targetH = img.height;
+
+      // Restrict max dimension if too huge
+      const currentMax = Math.max(targetW, targetH);
+      if (currentMax > maxDimension) {
+        const scale = maxDimension / currentMax;
+        targetW = Math.round(targetW * scale);
+        targetH = Math.round(targetH * scale);
+      }
+
+      canvas.width = targetW;
+      canvas.height = targetH;
+
+      // Pure white background for JPEGs
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, targetW, targetH);
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+
+      // 2. Apply Signature B&W threshold filter if enabled
+      if (isSignatureMode) {
+        const imgData = ctx.getImageData(0, 0, targetW, targetH);
+        const data = imgData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          // Grayscale luminance formula
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          if (lum > bwThreshold) {
+            // Whitewash paper background
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+          } else {
+            // Darken pen ink
+            data[i] = Math.max(0, Math.floor(r * 0.4));
+            data[i + 1] = Math.max(0, Math.floor(g * 0.4));
+            data[i + 2] = Math.max(0, Math.floor(b * 0.6));
+          }
+        }
+        ctx.putImageData(imgData, 0, 0);
+      }
+
+      // 3. Iterative Binary Quality Search for exact Target KB
+      const targetBytes = targetKb * 1024;
+      let lowQ = 0.01;
+      let highQ = 0.999;
+      let bestBlob: Blob | null = null;
+      let bestQuality = 0.8;
+
+      // Helper function to get canvas blob
+      const getBlobAsync = (q: number): Promise<Blob | null> => {
+        return new Promise((resolve) => {
+          canvas.toBlob((b) => resolve(b), fileType, q);
+        });
+      };
+
+      // Check max quality first
+      let testBlob = await getBlobAsync(0.995);
+      if (testBlob && testBlob.size <= targetBytes) {
+        bestBlob = testBlob;
+      } else {
+        // High-precision binary search (14 iterations)
+        for (let iter = 0; iter < 14; iter++) {
+          const midQ = (lowQ + highQ) / 2;
+          testBlob = await getBlobAsync(midQ);
+          if (!testBlob) break;
+
+          if (testBlob.size <= targetBytes) {
+            bestBlob = testBlob;
+            bestQuality = midQ;
+            lowQ = midQ; // try higher quality while staying under target
+          } else {
+            highQ = midQ; // too big, lower quality
+          }
+        }
+
+        // If still over target even at lowest quality, progressively downscale dimensions
+        if (!bestBlob || bestBlob.size > targetBytes) {
+          let scaleFactor = 0.90;
+          while (scaleFactor >= 0.20) {
+            const scaledW = Math.max(80, Math.round(targetW * scaleFactor));
+            const scaledH = Math.max(80, Math.round(targetH * scaleFactor));
+            
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = scaledW;
+            tempCanvas.height = scaledH;
+            const tCtx = tempCanvas.getContext('2d');
+            if (tCtx) {
+              tCtx.fillStyle = '#ffffff';
+              tCtx.fillRect(0, 0, scaledW, scaledH);
+              tCtx.drawImage(canvas, 0, 0, scaledW, scaledH);
+              
+              let sMinQ = 0.40;
+              let sMaxQ = 0.98;
+              let sBest: Blob | null = null;
+              for (let k = 0; k < 6; k++) {
+                const sMid = (sMinQ + sMaxQ) / 2;
+                const sBlob: Blob | null = await new Promise((res) => {
+                  tempCanvas.toBlob((b) => res(b), fileType, sMid);
+                });
+                if (sBlob && sBlob.size <= targetBytes) {
+                  sBest = sBlob;
+                  sMinQ = sMid;
+                } else {
+                  sMaxQ = sMid;
+                }
+              }
+
+              if (sBest) {
+                bestBlob = sBest;
+                targetW = scaledW;
+                targetH = scaledH;
+                break;
+              }
+            }
+            scaleFactor -= 0.12;
+          }
+        }
+      }
+
+      if (!bestBlob) {
+        bestBlob = await getBlobAsync(0.3);
+      }
+
+      if (bestBlob) {
+        const finalUrl = URL.createObjectURL(bestBlob);
+        setCompressedBlob(bestBlob);
+        setCompressedUrl(finalUrl);
+        setCompressedSizeKb(Math.round((bestBlob.size / 1024) * 10) / 10);
+        setCompressedDims({ width: targetW, height: targetH });
+      }
+
+      setIsCompressing(false);
+    };
+  }, [originalUrl, targetKb, isSignatureMode, bwThreshold, maxDimension, fileType]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      runCompression();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [runCompression]);
+
+  const handleDownload = () => {
+    if (!compressedBlob) return;
+    const link = document.createElement('a');
+    const ext = fileType === 'image/png' ? 'png' : 'jpg';
+    const prefix = isSignatureMode ? 'signature' : 'photo';
+    link.download = `${prefix}_under_${targetKb}kb.${ext}`;
+    link.href = URL.createObjectURL(compressedBlob);
+    link.click();
+  };
+
+  const isUnderTarget = compressedSizeKb <= targetKb;
+  const reductionPercent = originalSizeKb > 0 
+    ? Math.round(((originalSizeKb - compressedSizeKb) / originalSizeKb) * 100)
+    : 0;
+
+  return (
+    <div className="space-y-5">
+      {/* Top Banner */}
+      <div className="bg-gradient-to-r from-emerald-900 to-teal-900 text-white p-4 rounded-xl shadow-sm border border-emerald-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-emerald-600 rounded-lg shadow-inner">
+            <Zap className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h2 className="text-base sm:text-lg font-bold tracking-tight">
+              Instant Image & Signature KB Compressor
+            </h2>
+            <p className="text-xs text-emerald-200">
+              फोटो व सिग्नेचर साइज रिड्यूसर • 20 KB / 50 KB / 100 KB सटीक कंप्रेसर • वाइट बैकग्राउंड बूस्ट
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileUpload} 
+            accept="image/*" 
+            className="hidden" 
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-emerald-950 font-bold text-xs shadow-sm hover:bg-emerald-50 transition-colors cursor-pointer"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            Upload Photo / Signature
+          </button>
+        </div>
+      </div>
+
+      {/* Main Grid: Controls vs Preview */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        
+        {/* Left Side: Controls & Sliders (5 Cols) */}
+        <div className="lg:col-span-5 space-y-4">
+          
+          {/* Preset Target Size Pills & Custom Numeric KB Input */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <span>Target Upload Limit (सटीक KB सीमा)</span>
+              </label>
+              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                Limit: &lt; {targetKb} KB
+              </span>
+            </div>
+
+            {/* Custom Numeric Input Box */}
+            <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800/60 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                  Custom Target Size (KB):
+                </label>
+                <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium">
+                  Type any exact number (e.g. 20, 50, 100)
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="number"
+                    min="5"
+                    max="2000"
+                    value={customKbInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCustomKbInput(val);
+                      const parsed = parseInt(val, 10);
+                      if (!isNaN(parsed) && parsed >= 5) {
+                        setTargetKb(Math.max(5, parsed - 2)); // Safety buffer to stay strictly under portal limit
+                      }
+                    }}
+                    placeholder="e.g. 50"
+                    className="w-full pl-3 pr-10 py-2 text-sm font-bold font-mono rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                    KB
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const parsed = parseInt(customKbInput, 10);
+                    if (!isNaN(parsed) && parsed > 10) {
+                      const next = parsed - 5;
+                      setCustomKbInput(String(next));
+                      setTargetKb(Math.max(5, next - 2));
+                    }
+                  }}
+                  className="px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 cursor-pointer"
+                  title="Decrease 5 KB"
+                >
+                  -5
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const parsed = parseInt(customKbInput, 10) || 50;
+                    const next = parsed + 5;
+                    setCustomKbInput(String(next));
+                    setTargetKb(Math.max(5, next - 2));
+                  }}
+                  className="px-2.5 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 cursor-pointer"
+                  title="Increase 5 KB"
+                >
+                  +5
+                </button>
+              </div>
+            </div>
+
+            {/* Quick 1-Click Presets */}
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                Standard Government Presets:
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {[
+                  { kb: 20, inputVal: '20', label: '< 20 KB', sub: 'Signatures', sig: true, dim: 500 },
+                  { kb: 48, inputVal: '50', label: '< 50 KB', sub: 'SSC / UPSC', sig: false, dim: 800 },
+                  { kb: 96, inputVal: '100', label: '< 100 KB', sub: 'ID Cards', sig: false, dim: 1200 },
+                  { kb: 195, inputVal: '200', label: '< 200 KB', sub: 'Certificates', sig: false, dim: 1600 },
+                ].map((p) => {
+                  const isMatch = customKbInput === p.inputVal;
+                  return (
+                    <button
+                      key={p.inputVal}
+                      type="button"
+                      onClick={() => {
+                        setCustomKbInput(p.inputVal);
+                        setTargetKb(p.kb);
+                        setIsSignatureMode(p.sig);
+                        setMaxDimension(p.dim);
+                      }}
+                      className={`p-2 rounded-lg text-center border text-xs font-bold transition-all cursor-pointer ${
+                        isMatch
+                          ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500 shadow-xs'
+                          : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      <div className="font-bold leading-tight">{p.label}</div>
+                      <div className="text-[9px] font-normal text-slate-500 mt-0.5 truncate">{p.sub}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Fine-tune Target KB Slider */}
+            <div className="pt-1">
+              <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 mb-1">
+                <span>Slider Fine-tune:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{targetKb} KB</span>
+              </div>
+              <input
+                type="range"
+                min="5"
+                max="300"
+                step="1"
+                value={targetKb}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  setTargetKb(val);
+                  setCustomKbInput(String(val + 2));
+                }}
+                className="w-full accent-emerald-600 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* Signature Cleaning & B&W Enhancement Mode */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <PenTool className="w-3.5 h-3.5 text-emerald-600" />
+                Signature Digital Clean-up Mode
+              </label>
+              <input
+                type="checkbox"
+                checked={isSignatureMode}
+                onChange={(e) => setIsSignatureMode(e.target.checked)}
+                className="w-4 h-4 text-emerald-600 rounded cursor-pointer"
+              />
+            </div>
+
+            {isSignatureMode ? (
+              <div className="space-y-2 pt-1">
+                <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                  White Background & Contrast Threshold:
+                </div>
+                <input
+                  type="range"
+                  min="100"
+                  max="230"
+                  step="2"
+                  value={bwThreshold}
+                  onChange={(e) => setBwThreshold(parseInt(e.target.value))}
+                  className="w-full accent-emerald-600 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-slate-500">
+                  <span>Preserve light ink</span>
+                  <span>Pure white background</span>
+                </div>
+                <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 rounded border border-emerald-200 dark:border-emerald-800 text-[10px] text-emerald-700 dark:text-emerald-300">
+                  ✓ Automatically removes shadows, grey paper tint, and yellow mobile camera cast.
+                </div>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-500">
+                Turn on for signatures to make the paper background 100% white and ink crisp.
+              </p>
+            )}
+          </div>
+
+          {/* Dimension & Format Settings */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3 text-xs">
+            <h3 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+              <Sliders className="w-3.5 h-3.5 text-emerald-600" />
+              Dimensions & Format
+            </h3>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-slate-500 block mb-1">Max Pixel Resolution</label>
+                <select
+                  value={maxDimension}
+                  onChange={(e) => setMaxDimension(Number(e.target.value))}
+                  className="w-full text-xs p-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                >
+                  <option value={400}>400 px (Passport standard)</option>
+                  <option value={600}>600 px (Recommended)</option>
+                  <option value={1000}>1000 px (Full HD)</option>
+                  <option value={1600}>1600 px (High Detail)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-500 block mb-1">Output Format</label>
+                <select
+                  value={fileType}
+                  onChange={(e) => setFileType(e.target.value as any)}
+                  className="w-full text-xs p-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                >
+                  <option value="image/jpeg">JPG / JPEG (Standard)</option>
+                  <option value="image/png">PNG</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Right Side: Before vs After Comparison & Download (7 Cols) */}
+        <div className="lg:col-span-7 flex flex-col space-y-3">
+          
+          {/* Status Header */}
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {isUnderTarget ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  PASS: {compressedSizeKb} KB (Target &lt;{targetKb} KB)
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-300">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                  {compressedSizeKb} KB
+                </span>
+              )}
+              {reductionPercent > 0 && (
+                <span className="text-[11px] font-semibold text-slate-500">
+                  ({reductionPercent}% reduced)
+                </span>
+              )}
+            </div>
+
+            <button
+              id="compressor-download-btn"
+              onClick={handleDownload}
+              disabled={!compressedBlob || isCompressing}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Compressed JPEG</span>
+            </button>
+          </div>
+
+          {/* Side-by-Side Comparison Box */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1">
+            
+            {/* Original Card */}
+            <div className="bg-slate-100 dark:bg-slate-900 rounded-xl p-3 border border-slate-200 dark:border-slate-800 flex flex-col">
+              <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
+                <span>Original File</span>
+                <span className="font-mono text-slate-500">{originalSizeKb} KB</span>
+              </div>
+              <div className="flex-1 bg-white dark:bg-slate-950 rounded-lg border border-slate-300 dark:border-slate-800 flex items-center justify-center p-2 min-h-[220px]">
+                {originalUrl ? (
+                  <img
+                    src={originalUrl}
+                    alt="Original Preview"
+                    className="max-h-[220px] max-w-full object-contain rounded"
+                  />
+                ) : (
+                  <div className="text-xs text-slate-400">No Image Uploaded</div>
+                )}
+              </div>
+              <div className="text-[10px] text-slate-500 mt-2 text-center">
+                Dimensions: {originalDims.width} × {originalDims.height} px
+              </div>
+            </div>
+
+            {/* Compressed Card */}
+            <div className="bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl p-3 border border-emerald-300 dark:border-emerald-800 flex flex-col">
+              <div className="flex justify-between items-center text-xs font-bold text-emerald-800 dark:text-emerald-300 mb-2">
+                <span>Compressed Output</span>
+                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                  {isCompressing ? 'Compressing...' : `${compressedSizeKb} KB`}
+                </span>
+              </div>
+              <div className="flex-1 bg-white dark:bg-slate-950 rounded-lg border border-emerald-200 dark:border-emerald-900 flex items-center justify-center p-2 min-h-[220px] relative">
+                {compressedUrl ? (
+                  <img
+                    src={compressedUrl}
+                    alt="Compressed Output"
+                    className="max-h-[220px] max-w-full object-contain rounded"
+                  />
+                ) : (
+                  <div className="text-xs text-slate-400">Processing...</div>
+                )}
+              </div>
+              <div className="text-[10px] text-emerald-700 dark:text-emerald-400 mt-2 text-center font-medium">
+                Output: {compressedDims.width} × {compressedDims.height} px • Ready to upload to Govt Portal
+              </div>
+            </div>
+
+          </div>
+
+          {/* Quick Guide Tips */}
+          <div className="bg-slate-100 dark:bg-slate-900/60 p-3 rounded-lg border border-slate-200 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
+            <div className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              Guaranteed Govt Portal Compatibility:
+            </div>
+            <p>
+              • <strong>SSC / UPSC / IBPS</strong>: Requires Signature between <strong>10 KB - 20 KB</strong> and Photo between <strong>20 KB - 50 KB</strong> in JPG format.
+            </p>
+            <p>
+              • <strong>NSDL PAN Card</strong>: Requires Photo (3.5x2.5cm) under 50KB and Signature under 20KB at 200-300 DPI.
+            </p>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  );
+};
