@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix 100% FREE Make PDF, BG remover, Docs \u0026 OCR Edit",
+  "description": "All-in-one free cyber cafe toolkit featuring 1-click background removal, custom KB photo \u0026 signature compressor, PDF tools suite, document merging, and Hindi/English certificate OCR text extractor. Fast, secure, and professional online utilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
